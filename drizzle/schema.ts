@@ -1,4 +1,13 @@
-import { mysqlTable, varchar, timestamp, text, mysqlEnum, json, int, boolean } from "drizzle-orm/mysql-core";
+import {
+  mysqlTable,
+  varchar,
+  timestamp,
+  text,
+  mysqlEnum,
+  json,
+  int,
+  boolean,
+} from "drizzle-orm/mysql-core";
 
 export const workspaces = mysqlTable("workspaces", {
   id: varchar("id", { length: 36 }).primaryKey(),

@@ -16,8 +16,6 @@ import {
 } from "@/components/ui/select";
 import { CheckCircle2, Loader2, ArrowRight } from "lucide-react";
 import { createServerFn } from "@tanstack/react-start";
-import { db } from "../db";
-import { targetProfiles } from "../../drizzle/schema";
 
 const formSchema = z.object({
   industry: z.string().min(2, "Industry must be at least 2 characters"),
@@ -68,6 +66,9 @@ const submitIntakeFn = createServerFn({ method: "POST" })
     // Default to the user's ID for workspace_id temporarily until workspace selection is built
     const workspaceId = session.user.id;
 
+    const { db } = await import("../db");
+    const { targetProfiles } = await import("../../drizzle/schema");
+
     await db.insert(targetProfiles).values({
       id: runId,
       workspace_id: workspaceId,
@@ -98,6 +99,8 @@ const getIntakeFn = createServerFn({ method: "GET" }).handler(async () => {
 
   const workspaceId = session.user.id;
   const { eq, desc } = await import("drizzle-orm");
+  const { db } = await import("../db");
+  const { targetProfiles } = await import("../../drizzle/schema");
   const result = await db.query.targetProfiles.findFirst({
     where: eq(targetProfiles.workspace_id, workspaceId),
     orderBy: desc(targetProfiles.created_at),
@@ -106,7 +109,7 @@ const getIntakeFn = createServerFn({ method: "GET" }).handler(async () => {
       industry: true,
       employee_min: true,
       keywords: true,
-    }
+    },
   });
   return result || null;
 });
