@@ -26,6 +26,26 @@ if (fs.existsSync(envPath)) {
 export async function verifyConnection() {
   console.log("Attempting read-only connection to Hostinger MySQL...");
 
+  // Safe diagnostic: confirm env var is present and show non-sensitive parsed fields only
+  const rawUrl = process.env["HOSTINGER_DB_URL"];
+  console.log("[diag] HOSTINGER_DB_URL present:", !!rawUrl);
+  if (rawUrl) {
+    try {
+      const withoutScheme = rawUrl.replace(/^mysql:\/\//, "");
+      const lastAt = withoutScheme.lastIndexOf("@");
+      const hostpart = withoutScheme.slice(lastAt + 1);
+      const slashIdx = hostpart.indexOf("/");
+      const hostport = hostpart.slice(0, slashIdx);
+      const database = hostpart.slice(slashIdx + 1);
+      const [host, portStr] = hostport.split(":");
+      console.log("[diag] Parsed host:", host);
+      console.log("[diag] Parsed port:", portStr ?? "3306");
+      console.log("[diag] Parsed database:", database);
+    } catch {
+      console.log("[diag] Could not parse HOSTINGER_DB_URL safely");
+    }
+  }
+
   let poolConnection;
 
   try {

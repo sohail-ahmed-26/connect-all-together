@@ -1,19 +1,12 @@
 {
   "version": "7",
-  "dialect": "postgresql",
+  "dialect": "mysql",
   "entries": [
     {
       "idx": 0,
-      "version": "7",
-      "when": 1790400590513,
-      "tag": "0000_foundation_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1790400616540,
-      "tag": "0001_revoke_anon_helpers",
+      "version": "5",
+      "when": 1790481446744,
+      "tag": "0000_aspiring_talon",
       "breakpoints": true
     }
   ]
