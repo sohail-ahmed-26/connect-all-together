@@ -1,6 +1,6 @@
 # Connect All Together
 
-@connector:google_maps:"Google Maps Platform" @connector:google_mail:"Gmail" @connector:google_sheets:"Google Sheets" @connector:whatsapp:"WhatsApp Business"  @connector:x:"X (Twitter)"
+@connector:google_maps:"Google Maps Platform" @connector:google_mail:"Gmail" @connector:google_sheets:"Google Sheets" @connector:whatsapp:"WhatsApp Business" @connector:x:"X (Twitter)"
 
 This project was built with [Lovable](https://lovable.dev).
 

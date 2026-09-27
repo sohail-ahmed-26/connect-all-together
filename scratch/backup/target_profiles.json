@@ -1,0 +1,18 @@
+[
+  {
+    "id": "e8974555-e90a-4b28-be88-2a2a68ea96aa",
+    "workspace_id": "demo-workspace-001",
+    "name": "Sohail Ahmed",
+    "industry": "Technology & Software",
+    "target_location": "saudia",
+    "employee_min": 22,
+    "employee_max": 222,
+    "budget_range": "$500K – $1M",
+    "keywords": "ai engineering",
+    "additional_filters": null,
+    "status": "active",
+    "submitted_at": "2026-09-26 14:21:46",
+    "created_at": "2026-09-26 14:21:46",
+    "updated_at": "2026-09-26 14:21:46"
+  }
+]
