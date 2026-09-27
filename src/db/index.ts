@@ -8,13 +8,57 @@ if (!dbUrl && process.env["NODE_ENV"] === "production") {
   throw new Error("HOSTINGER_DB_URL environment variable is not set");
 }
 
-// Create the connection pool
+/**
+ * Safely parse a MySQL connection URL that may contain special characters
+ * (including @ and * ) in the password. Node's URL class uses the LAST @ as
+ * the user-info / host delimiter, so we extract each part explicitly.
+ *
+ * Format: mysql://user:password@host:port/database
+ */
+function parseMysqlUrl(rawUrl: string) {
+  // Strip scheme
+  const withoutScheme = rawUrl.replace(/^mysql:\/\//, "");
+
+  // Split on the LAST @ to isolate userinfo from host
+  const lastAt = withoutScheme.lastIndexOf("@");
+  const userinfo = withoutScheme.slice(0, lastAt);
+  const hostpart = withoutScheme.slice(lastAt + 1);
+
+  // userinfo = "user:password" — split on FIRST colon only
+  const colonIdx = userinfo.indexOf(":");
+  const user = userinfo.slice(0, colonIdx);
+  const password = userinfo.slice(colonIdx + 1);
+
+  // hostpart = "host:port/database"
+  const slashIdx = hostpart.indexOf("/");
+  const hostport = hostpart.slice(0, slashIdx);
+  const database = hostpart.slice(slashIdx + 1);
+  const [host, portStr] = hostport.split(":");
+  const port = portStr ? parseInt(portStr, 10) : 3306;
+
+  return { host, port, user, password, database };
+}
+
+const fallbackConfig = {
+  host: "localhost",
+  port: 3306,
+  user: "user",
+  password: "pass",
+  database: "db",
+};
+const connConfig = dbUrl ? parseMysqlUrl(dbUrl) : fallbackConfig;
+
+// Create the connection pool using discrete parameters (safe for special chars in password)
 export const poolConnection = mysql.createPool({
-  uri: dbUrl || "mysql://user:pass@localhost:3306/db",
+  host: connConfig.host as string,
+  port: connConfig.port,
+  user: connConfig.user,
+  password: connConfig.password,
+  database: connConfig.database,
   waitForConnections: true,
   connectionLimit: 10,
-  maxIdle: 10, // max idle connections, the default value is the same as `connectionLimit`
-  idleTimeout: 60000, // idle connections timeout, in milliseconds, the default value 60000
+  maxIdle: 10,
+  idleTimeout: 60000,
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
