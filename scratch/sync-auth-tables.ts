@@ -7,21 +7,25 @@ async function applyAuthMigrations() {
 
     // 1. Rename users to user if it exists
     const [rows] = await db.execute("SHOW TABLES LIKE 'users'");
-    if ((rows as any[]).length > 0) {
+    if ((rows as unknown[]).length > 0) {
       await db.execute("RENAME TABLE `users` TO `user`");
       console.log("Renamed users -> user");
     }
 
     // 2. Modify email_verified to boolean (tinyint) in user
-    await db.execute("ALTER TABLE `user` MODIFY COLUMN `email_verified` boolean NOT NULL DEFAULT false");
+    await db.execute(
+      "ALTER TABLE `user` MODIFY COLUMN `email_verified` boolean NOT NULL DEFAULT false",
+    );
     console.log("Updated email_verified in user");
 
     // 3. Add id_token to account
     try {
       await db.execute("ALTER TABLE `account` ADD COLUMN `id_token` text");
       console.log("Added id_token to account");
-    } catch (e: any) {
-      if (!e.message.includes("Duplicate column name")) {
+    } catch (e: unknown) {
+      if (e instanceof Error && !e.message.includes("Duplicate column name")) {
+        throw e;
+      } else if (!(e instanceof Error)) {
         throw e;
       }
     }
