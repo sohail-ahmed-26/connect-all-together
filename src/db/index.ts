@@ -1,6 +1,29 @@
 import { drizzle } from "drizzle-orm/mysql2";
 import mysql from "mysql2/promise";
 import * as schema from "../../drizzle/schema";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+
+// ── Load .env manually so SSR server functions get non-VITE_ vars ─────────────
+// Vite only injects VITE_* env vars into SSR. We read .env ourselves so that
+// HOSTINGER_DB_URL and PROSPEO_API_KEY are always available on process.env.
+try {
+  const envPath = resolve(process.cwd(), ".env");
+  const raw = readFileSync(envPath, "utf-8");
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx < 1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
+    if (key && !(key in process.env)) {
+      process.env[key] = val;
+    }
+  }
+} catch {
+  // .env not present (production uses real env vars) — ignore
+}
 
 // Ensure environment variable is provided
 const dbUrl = process.env["HOSTINGER_DB_URL"];

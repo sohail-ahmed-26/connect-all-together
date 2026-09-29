@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 import { useForm, Controller } from "react-hook-form";
@@ -17,9 +17,21 @@ import {
 import { CheckCircle2, Loader2, ArrowRight } from "lucide-react";
 import { createServerFn } from "@tanstack/react-start";
 
+// Company size options — using plain ASCII hyphen to avoid any Unicode mismatch
+const COMPANY_SIZES = ["1-10", "11-50", "51-200", "201+"] as const;
+type CompanySize = (typeof COMPANY_SIZES)[number];
+
+// Display labels for each size value shown in the UI
+const COMPANY_SIZE_LABELS: Record<CompanySize, string> = {
+  "1-10": "1–10 employees",
+  "11-50": "11–50 employees",
+  "51-200": "51–200 employees",
+  "201+": "201+ employees",
+};
+
 const formSchema = z.object({
   industry: z.string().min(2, "Industry must be at least 2 characters"),
-  companySize: z.enum(["1–10", "11–50", "51–200", "201+"], {
+  companySize: z.enum(COMPANY_SIZES, {
     required_error: "Please select a company size",
   }),
   jobTitles: z.string().min(2, "Job titles are required"),
@@ -32,15 +44,15 @@ const submitIntakeFn = createServerFn({ method: "POST" })
     const runId = crypto.randomUUID();
 
     // Map company size to min/max
-    let min = null;
-    let max = null;
-    if (parsed.companySize === "1–10") {
+    let min: number | null = null;
+    let max: number | null = null;
+    if (parsed.companySize === "1-10") {
       min = 1;
       max = 10;
-    } else if (parsed.companySize === "11–50") {
+    } else if (parsed.companySize === "11-50") {
       min = 11;
       max = 50;
-    } else if (parsed.companySize === "51–200") {
+    } else if (parsed.companySize === "51-200") {
       min = 51;
       max = 200;
     } else if (parsed.companySize === "201+") {
@@ -58,9 +70,8 @@ const submitIntakeFn = createServerFn({ method: "POST" })
     }
 
     if (!session?.user) {
-      throw new Error(
-        "Unauthorized: Workspace authentication is not yet available. Please log in.",
-      );
+      // No active session — client will be told to log in
+      throw new Error("AUTH_REQUIRED");
     }
 
     // Default to the user's ID for workspace_id temporarily until workspace selection is built
@@ -72,7 +83,7 @@ const submitIntakeFn = createServerFn({ method: "POST" })
     await db.insert(targetProfiles).values({
       id: runId,
       workspace_id: workspaceId,
-      name: `${parsed.industry} (${parsed.companySize})`,
+      name: `${parsed.industry} (${COMPANY_SIZE_LABELS[parsed.companySize]})`,
       industry: parsed.industry,
       employee_min: min,
       employee_max: max,
@@ -121,8 +132,18 @@ export const Route = createFileRoute("/intake")({
 
 type FormValues = z.infer<typeof formSchema>;
 
+/** Reverse-map employee_min back to the ASCII key used as the select value */
+function sizeKeyFromMin(min: number | null | undefined): CompanySize {
+  if (min === 1) return "1-10";
+  if (min === 11) return "11-50";
+  if (min === 51) return "51-200";
+  if (min === 201) return "201+";
+  return "1-10";
+}
+
 function IntakePage() {
   const existingProfile = Route.useLoaderData();
+  const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successData, setSuccessData] = useState<{ status: string; runId: string } | null>(
     existingProfile ? { status: "success", runId: existingProfile.id } : null,
@@ -132,8 +153,6 @@ function IntakePage() {
   const {
     register,
     handleSubmit,
-    setValue,
-    watch,
     control,
     formState: { errors },
   } = useForm<FormValues>({
@@ -141,15 +160,7 @@ function IntakePage() {
     defaultValues: existingProfile
       ? {
           industry: existingProfile.industry,
-          companySize: (existingProfile.employee_min === 1
-            ? "1–10"
-            : existingProfile.employee_min === 11
-              ? "11–50"
-              : existingProfile.employee_min === 51
-                ? "51–200"
-                : existingProfile.employee_min === 201
-                  ? "201+"
-                  : "1–10") as "1–10" | "11–50" | "51–200" | "201+",
+          companySize: sizeKeyFromMin(existingProfile.employee_min),
           jobTitles: existingProfile.keywords || "",
         }
       : {
@@ -158,21 +169,32 @@ function IntakePage() {
         },
   });
 
-  const companySize = watch("companySize");
-
   const onSubmit = async (data: FormValues) => {
     setIsSubmitting(true);
     setServerError(null);
 
     try {
       const result = await submitIntakeFn({ data });
-
       setSuccessData(result);
     } catch (err) {
       const error = err as Error;
+      if (error.message?.includes("AUTH_REQUIRED")) {
+        // Not logged in — redirect to login page
+        navigate({ to: "/login" });
+        return;
+      }
       setServerError(error.message || "An unexpected error occurred.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleContinue = () => {
+    if (successData) {
+      navigate({
+        to: "/lead-discovery",
+        search: { profileId: successData.runId },
+      });
     }
   };
 
@@ -184,17 +206,23 @@ function IntakePage() {
             <CheckCircle2 className="h-6 w-6 text-primary" />
           </div>
           <h2 className="mb-2 text-2xl font-bold tracking-tight text-foreground">
-            Targeting Submitted
+            Target Profile Saved
           </h2>
-          <p className="mb-6 text-sm text-muted-foreground">
-            Your intake has been successfully received and passed to the workflow engine.
+          <p className="mb-4 text-sm text-muted-foreground">
+            Your targeting criteria have been saved. Continue to discover matching leads.
           </p>
-          <div className="mb-6 rounded-md bg-muted p-3 text-xs text-muted-foreground font-mono">
-            Run ID: {successData.runId}
+          <div className="mb-6 break-all rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
+            Profile ID: {successData.runId}
           </div>
-          <Button onClick={() => setSuccessData(null)} variant="outline" className="w-full">
-            Submit Another
-          </Button>
+          <div className="space-y-3">
+            <Button id="continue-to-lead-discovery" onClick={handleContinue} className="w-full">
+              Continue to Lead Discovery
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+            <Button onClick={() => setSuccessData(null)} variant="outline" className="w-full">
+              Edit Profile
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -230,14 +258,15 @@ function IntakePage() {
               name="companySize"
               render={({ field }) => (
                 <Select onValueChange={field.onChange} value={field.value}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id="companySize" className="w-full">
                     <SelectValue placeholder="Select company size" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="1–10">1–10 employees</SelectItem>
-                    <SelectItem value="11–50">11–50 employees</SelectItem>
-                    <SelectItem value="51–200">51–200 employees</SelectItem>
-                    <SelectItem value="201+">201+ employees</SelectItem>
+                    {COMPANY_SIZES.map((size) => (
+                      <SelectItem key={size} value={size}>
+                        {COMPANY_SIZE_LABELS[size]}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               )}
@@ -273,7 +302,7 @@ function IntakePage() {
               </>
             ) : (
               <>
-                Start Target Workflow
+                Save Target Profile
                 <ArrowRight className="ml-2 h-4 w-4" />
               </>
             )}

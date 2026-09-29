@@ -7,6 +7,7 @@ import {
   json,
   int,
   boolean,
+  unique,
 } from "drizzle-orm/mysql-core";
 
 export const workspaces = mysqlTable("workspaces", {
@@ -85,6 +86,10 @@ export const leads = mysqlTable("leads", {
   workspace_id: varchar("workspace_id", { length: 36 })
     .notNull()
     .references(() => workspaces.id),
+  target_profile_id: varchar("target_profile_id", { length: 36 })
+    .notNull()
+    .references(() => targetProfiles.id),
+  provider_id: varchar("provider_id", { length: 255 }),
   campaign_id: varchar("campaign_id", { length: 36 }),
   company_id: varchar("company_id", { length: 36 }),
   contact_id: varchar("contact_id", { length: 36 }),
@@ -96,7 +101,9 @@ export const leads = mysqlTable("leads", {
   metadata: json("metadata"),
   created_at: timestamp("created_at").defaultNow().notNull(),
   updated_at: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  unqProvider: unique("unq_workspace_source_provider").on(table.workspace_id, table.source, table.provider_id)
+}));
 
 /**
  * target_profiles — Issue #1 Target Intake Agent

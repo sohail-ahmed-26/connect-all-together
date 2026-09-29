@@ -15,4 +15,5 @@ export const auth = betterAuth({
   },
   secret: BETTER_AUTH_SECRET,
   baseURL: process.env["VITE_APP_URL"] || "http://localhost:8080",
+  trustedOrigins: ["https://*.lovable.cloud", "https://*.lovable.dev", "http://localhost:8080", "http://localhost:8081"],
 });

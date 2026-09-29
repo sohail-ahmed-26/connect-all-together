@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Target, ArrowRight } from "lucide-react";
+import { Target, ArrowRight, LogIn } from "lucide-react";
 
 // No head() here: the home route inherits title/description/og/twitter from
 // __root.tsx, and ships no og:image so serve-time hosting can inject the
@@ -18,14 +18,24 @@ function Index() {
         <h1 className="text-3xl font-bold text-foreground">Connect All Together</h1>
         <p className="text-muted-foreground">AI-powered outreach platform</p>
       </div>
-      <Link
-        id="go-to-target-intake"
-        to="/intake"
-        className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 transition-colors"
-      >
-        Open Target Intake Agent
-        <ArrowRight className="w-4 h-4" />
-      </Link>
+      <div className="flex flex-col items-center gap-3">
+        <Link
+          id="go-to-target-intake"
+          to="/intake"
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 transition-colors"
+        >
+          Open Target Intake Agent
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+        <Link
+          id="go-to-login"
+          to="/login"
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-medium text-foreground hover:bg-accent transition-colors"
+        >
+          <LogIn className="w-4 h-4" />
+          Sign in / Create account
+        </Link>
+      </div>
     </div>
   );
 }
