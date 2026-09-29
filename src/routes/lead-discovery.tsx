@@ -57,7 +57,7 @@ const getProfileFn = createServerFn({ method: "GET" })
     return profile;
   });
 
-// ─── Server function: Discover leads via Prospeo API ────────────────────────────
+// ─── Server function: Discover leads via Apify API ────────────────────────────
 const discoverLeadsFn = createServerFn({ method: "POST" })
   .validator((data: { profileId: string; additionalInstructions?: string }) => data)
   .handler(async ({ data }) => {
@@ -71,9 +71,18 @@ const discoverLeadsFn = createServerFn({ method: "POST" })
       profile = await db.query.targetProfiles.findFirst({
         where: eq(targetProfiles.id, data.profileId),
       });
-    } catch (dbError) {
+    } catch (dbError: any) {
+      console.error("====================== DB ERROR ======================");
       console.error("[discoverLeads] Database query failed:", dbError);
-      throw new Error(`Database error: ${(dbError as Error).message || String(dbError)}`);
+      console.error("Name:", dbError?.name);
+      console.error("Message:", dbError?.message);
+      console.error("Code:", dbError?.code);
+      console.error("Errno:", dbError?.errno);
+      console.error("SqlState:", dbError?.sqlState);
+      console.error("Cause:", dbError?.cause);
+      console.error("Stack:", dbError?.stack);
+      console.error("======================================================");
+      throw new Error(`Database error: ${dbError?.message || String(dbError)}`);
     }
 
     if (!profile) {
@@ -83,10 +92,10 @@ const discoverLeadsFn = createServerFn({ method: "POST" })
     // Use the profile's own workspace_id for saving leads
     const workspaceId = profile.workspace_id;
 
-    // Prepare Prospeo payload
-    const API_KEY = process.env["PROSPEO_API_KEY"];
+    // Prepare Apify payload
+    const API_KEY = process.env["APIFY_API_TOKEN"] || process.env["apify_api_key"];
     if (!API_KEY) {
-      throw new Error("PROSPEO_API_KEY is not configured on the server.");
+      throw new Error("APIFY_API_TOKEN is not configured on the server.");
     }
 
     const keywords = profile.keywords
@@ -96,97 +105,89 @@ const discoverLeadsFn = createServerFn({ method: "POST" })
           .filter(Boolean)
       : [];
 
+    const searchQueryParts = [];
+    if (profile.industry) searchQueryParts.push(profile.industry);
+    if (keywords.length > 0) searchQueryParts.push(...keywords);
+    const location = profile.target_location || "";
+    
+    let searchString = searchQueryParts.join(" ");
+    if (location) {
+        searchString += ` in ${location}`;
+    }
+    if (!searchString) searchString = "businesses";
 
-    // Helper: call Prospeo and return the raw JSON
-
-    const callProspeo = async (body: Record<string, unknown>): Promise<Record<string, unknown>> => {
-      const res = await fetch("https://api.prospeo.io/search-person", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-KEY": API_KEY,
-        },
-        body: JSON.stringify(body),
-      });
-      return (await res.json()) as Record<string, unknown>;
+    const payload = {
+        searchStringsArray: [searchString],
+        maxCrawledPlacesPerSearch: 10,
+        language: "en",
+        maxImages: 0,
+        maxReviews: 0,
+        scrapeReviewerUrl: false,
+        includeWebResults: true, // Enables deep scraping for website emails and contacts
     };
 
-    // Strategy: company_keywords is the most reliable Prospeo filter.
-    // Try industry first, then keywords, then both combined.
-    let result: Record<string, unknown>;
-
-    // Primary: use industry as a company keyword (most reliable)
-    if (profile.industry) {
-      result = await callProspeo({
-        filters: { company_keywords: { include: [profile.industry] } },
-        page: 1,
+    const callApify = async () => {
+      const ACTOR_ID = "compass~crawler-google-places";
+      const res = await fetch(`https://api.apify.com/v2/acts/${ACTOR_ID}/run-sync-get-dataset-items?token=${API_KEY}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-    } else if (keywords.length > 0) {
-      result = await callProspeo({
-        filters: { company_keywords: { include: keywords.slice(0, 3) } },
-        page: 1,
-      });
-    } else {
-      result = await callProspeo({ filters: {}, page: 1 });
-    }
-
-    // Fallback: if no results and we haven't tried keywords yet, try them
-    if (result["error"] && result["error_code"] === "NO_RESULTS" && keywords.length > 0) {
-      result = await callProspeo({
-        filters: { company_keywords: { include: keywords.slice(0, 3) } },
-        page: 1,
-      });
-    }
-
-    if (result["error"]) {
-      if (result["error_code"] === "NO_RESULTS") {
-        return { leads: [] };
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Apify API error (${res.status}): ${errText.substring(0, 100)}`);
       }
-      throw new Error(
-        (result["filter_error"] as string) ||
-          (result["error_code"] as string) ||
-          String(result["error"]) ||
-          "Prospeo API error",
-      );
+      return await res.json();
+    };
+
+    let results: any[] = [];
+    try {
+      results = await callApify();
+    } catch (e: any) {
+       console.error("[discoverLeads] Apify execution failed:", e);
+       throw new Error(e.message || "Apify API error");
     }
 
-    // Map Prospeo results to our 'Lead' format
-    // Prospeo returns: result.results = [{person: {first_name, last_name, current_job_title,
-    //   current_company_name, current_company_website, ...}, ...}]
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const people = (result["results"] as Array<Record<string, any>>) || [];
-    console.log(`[discoverLeads] Prospeo returned ${people.length} results`);
+    if (!Array.isArray(results) || results.length === 0) {
+        return { leads: [] };
+    }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const mappedLeads = people.map((item: Record<string, any>) => {
-      // Prospeo wraps person data under a 'person' key
-      const p = (item["person"] || item) as Record<string, any>;
-      const companyName =
-        (p["current_company_name"] as string) ||
-        (p["job_history"] && (p["job_history"] as Array<{company_name: string}>)[0]?.company_name) ||
-        "Unknown Company";
-      const companyWebsite =
-        (p["current_company_website"] as string) || (p["current_company_domain"] as string) || "";
-      const location = [p["city"], p["state"], p["country"]]
-        .filter(Boolean)
-        .join(", ") || "Unknown Location";
+    console.log(`[discoverLeads] Apify returned ${results.length} results`);
 
+    const mappedLeads = results.map((item: any) => {
+      const companyName = item.title || "Unknown Company";
+      const companyWebsite = item.website || "";
+      const leadLocation = item.address || item.city || "Unknown Location";
+      const phone = item.phone || item.phoneUnformatted || "";
+      
+      // Try to extract email from various possible Apify Google Places output fields
+      let email = "";
+      if (item.email) email = item.email;
+      else if (item.emails && Array.isArray(item.emails) && item.emails.length > 0) email = item.emails[0];
+      else if (item.webResults && item.webResults.emails && item.webResults.emails.length > 0) email = item.webResults.emails[0];
+      
+      // Contact name might be in webResults or similar
+      let name = item.contactName || "";
+      if (!name && item.webResults && item.webResults.contacts && item.webResults.contacts.length > 0) {
+        name = item.webResults.contacts[0].name || "";
+      }
+      
       return {
-        id: (p["person_id"] as string) || crypto.randomUUID(),
+        id: item.placeId || crypto.randomUUID(),
         company: companyName,
         website: companyWebsite.startsWith("http")
           ? companyWebsite
           : companyWebsite
             ? `https://${companyWebsite}`
             : "",
-        industry: profile.industry || "",
-        location,
-        email: (typeof p["email"] === "object" && p["email"] ? p["email"]["email"] : p["email"] as string) || "Hidden",
-        phone: (typeof p["phone"] === "object" && p["phone"] ? p["phone"]["phone"] : p["phone"] as string) || "Hidden",
-        name: `${(p["first_name"] as string) || ""} ${(p["last_name"] as string) || ""}`.trim() || "Unknown",
-        jobTitle: (p["current_job_title"] as string) || "",
-        linkedinUrl: (p["linkedin_url"] as string) || "",
-        source: "Prospeo",
+        industry: item.categoryName || profile.industry || "",
+        location: leadLocation,
+        email: email,
+        phone: phone,
+        name: name, 
+        jobTitle: "",
+        linkedinUrl: "",
+        source: "Apify",
         discoveredAt: new Date().toISOString().split("T")[0] ?? "",
       };
     });
@@ -229,7 +230,7 @@ export const saveLeadsFn = createServerFn({ method: "POST" })
         .where(
           and(
             eq(leadsTable.workspace_id, workspaceId),
-            eq(leadsTable.source, "Prospeo"),
+            eq(leadsTable.source, "Apify"),
             inArray(leadsTable.provider_id, providerIds)
           )
         );
@@ -245,7 +246,7 @@ export const saveLeadsFn = createServerFn({ method: "POST" })
         target_profile_id: data.profileId,
         provider_id: lead.id,
         status: "new" as const,
-        source: "Prospeo" as const,
+        source: "Apify" as const,
         metadata: lead,
       }));
 
@@ -287,7 +288,7 @@ export const getSavedLeadsFn = createServerFn({ method: "GET" })
         email: meta.email || "Hidden",
         phone: meta.phone || "Hidden",
         linkedinUrl: meta.linkedinUrl || "",
-        source: s.source || "Prospeo",
+        source: s.source || "Apify",
         discoveredAt: meta.discoveredAt || s.created_at.toISOString().split("T")[0],
         isSaved: true
       } as Lead & { isSaved: boolean };
@@ -358,7 +359,7 @@ function EmptyState() {
   );
 }
 
-// ─── Prospeo connected banner ─────────────────────────────────────────────────
+// ─── Apify connected banner ─────────────────────────────────────────────────
 function ProviderDisconnectedBanner() {
   return (
     <div
@@ -367,11 +368,9 @@ function ProviderDisconnectedBanner() {
     >
       <PlugZap className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
       <div>
-        <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">
-          Prospeo connected
-        </p>
+        <p className="text-sm font-medium text-emerald-800 dark:text-emerald-200">Apify connected</p>
         <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-300">
-          Lead search is powered by Prospeo. Click &ldquo;Discover Leads&rdquo; to find companies
+          Lead search is powered by Apify. Click &ldquo;Discover Leads&rdquo; to find companies
           and contacts matching your target profile.
         </p>
       </div>
@@ -842,7 +841,7 @@ function LeadDiscoveryPage() {
                       No leads found
                     </h3>
                     <p className="mt-1.5 max-w-sm text-sm text-muted-foreground">
-                      Prospeo returned 0 results for your current target profile. Try broadening
+                      Apify returned 0 results for your current target profile. Try broadening
                       your industry or keywords and search again.
                     </p>
                   </div>

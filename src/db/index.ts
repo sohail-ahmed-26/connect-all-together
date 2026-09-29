@@ -71,21 +71,40 @@ const fallbackConfig = {
 };
 const connConfig = dbUrl ? parseMysqlUrl(dbUrl) : fallbackConfig;
 
+const globalForDb = globalThis as unknown as { poolConnection: mysql.Pool };
+
 // Create the connection pool using discrete parameters (safe for special chars in password)
-export const poolConnection = mysql.createPool({
-  host: connConfig.host as string,
-  port: connConfig.port,
-  user: connConfig.user,
-  password: connConfig.password,
-  database: connConfig.database,
-  waitForConnections: true,
-  connectionLimit: 10,
-  maxIdle: 10,
-  idleTimeout: 60000,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
-});
+export const poolConnection =
+  globalForDb.poolConnection ||
+  mysql.createPool({
+    host: connConfig.host as string,
+    port: connConfig.port,
+    user: connConfig.user,
+    password: connConfig.password,
+    database: connConfig.database,
+    waitForConnections: true,
+    connectionLimit: process.env["NODE_ENV"] === "production" ? 10 : 2,
+    maxIdle: process.env["NODE_ENV"] === "production" ? 10 : 1,
+    idleTimeout: 60000,
+    queueLimit: 0,
+    enableKeepAlive: process.env["NODE_ENV"] === "production",
+    keepAliveInitialDelay: 0,
+  });
+
+if (process.env["NODE_ENV"] !== "production") {
+  globalForDb.poolConnection = poolConnection;
+  
+  // Try to gracefully close connections when Vite/Nitro restarts the worker
+  const cleanup = async () => {
+    try {
+      await poolConnection.end();
+    } catch (err) {}
+  };
+  
+  process.on('beforeExit', cleanup);
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+}
 
 // Export the drizzle instance
 export const db = drizzle(poolConnection, { schema, mode: "default" });
